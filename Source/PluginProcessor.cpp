@@ -22,6 +22,20 @@ SimpleMBCompAudioProcessor::SimpleMBCompAudioProcessor()
                        )
 #endif
 {
+    attack = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("Attack"));
+    jassert(attack != nullptr);
+
+    release = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("Release"));
+    jassert(release != nullptr);
+
+    threshold = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("Threshold"));
+    jassert(threshold != nullptr);
+
+    ratio = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("Ratio"));
+    jassert(ratio != nullptr);
+
+    bypassed = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("Bypassed"));
+    jassert(bypassed != nullptr);
 }
 
 SimpleMBCompAudioProcessor::~SimpleMBCompAudioProcessor()
@@ -95,6 +109,13 @@ void SimpleMBCompAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+
+    juce::dsp::ProcessSpec spec;
+    spec.maximumBlockSize = samplesPerBlock;
+    spec.numChannels = getTotalNumOutputChannels();
+    spec.sampleRate = sampleRate;
+
+    compressor.prepare(spec);
 }
 
 void SimpleMBCompAudioProcessor::releaseResources()
@@ -144,18 +165,17 @@ void SimpleMBCompAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
-    {
-        auto* channelData = buffer.getWritePointer (channel);
+    compressor.setAttack(attack->get());
+    compressor.setRelease(release->get());
+    compressor.setThreshold(threshold->get());
+    compressor.setRatio(ratio->getCurrentChoiceName().getFloatValue());
 
-        // ..do something to the data...
-    }
+    auto block = juce::dsp::AudioBlock<float>(buffer);
+    auto context = juce::dsp::ProcessContextReplacing<float>(block);
+
+    context.isBypassed = bypassed->get();
+
+    compressor.process(context);
 }
 
 //==============================================================================
@@ -190,25 +210,25 @@ void SimpleMBCompAudioProcessor::setStateInformation (const void* data, int size
     }
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout SimpleMBCompAudioProcessor::creatParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout SimpleMBCompAudioProcessor::createParameterLayout()
 {
     APVTS::ParameterLayout layout;
 
     using namespace juce;
 
-    layout.add(std::make_unique<AudioParameterFloat>("Threshold", 
+    layout.add(std::make_unique<AudioParameterFloat>(ParameterID{ "Threshold", 1 },
         "Threshold", 
         NormalisableRange<float>(-60, 12, 1, 1), 
         0));
 
     auto attackReleaseRange = NormalisableRange<float>(5, 500, 1, 1);
 
-    layout.add(std::make_unique<AudioParameterFloat>("Attack",
+    layout.add(std::make_unique<AudioParameterFloat>(ParameterID{ "Attack", 1 },
         "Attack",
         attackReleaseRange,
         50));
 
-    layout.add(std::make_unique<AudioParameterFloat>("Release",
+    layout.add(std::make_unique<AudioParameterFloat>(ParameterID{ "Release", 1 },
         "Release",
         attackReleaseRange,
         250));
@@ -219,10 +239,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleMBCompAudioProcessor::
         sa.add(juce::String(choice, 1));
     }
 
-    layout.add(std::make_unique<AudioParameterChoice>("Ratio",
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID{ "Ratio", 1},
         "Ratio",
         sa,
         3));
+
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID{ "Bypassed", 1 },
+        "Bypassed",
+        false));
 
     return layout;
 }
