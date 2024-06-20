@@ -38,6 +38,7 @@ SimpleMBCompAudioProcessor::SimpleMBCompAudioProcessor()
     floatHelper(lowCrossover, Names::Low_Mid_Crossover_Freq);
     LP.setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
     HP.setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+    AP.setType(juce::dsp::LinkwitzRileyFilterType::allpass);
 
     auto choiceHelper = [&apvts = this->apvts, &params](auto& param, const auto& paramName)
     {
@@ -138,6 +139,9 @@ void SimpleMBCompAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     LP.prepare(spec);
     HP.prepare(spec);
 
+    AP.prepare(spec);
+    apBuffer.setSize(spec.numChannels, samplesPerBlock);
+
     for (auto& buffer : filterBuffers)
     {
         buffer.setSize(spec.numChannels, samplesPerBlock);
@@ -201,6 +205,7 @@ void SimpleMBCompAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto cutoff = lowCrossover->get();
     LP.setCutoffFrequency(cutoff);
     HP.setCutoffFrequency(cutoff);
+    AP.setCutoffFrequency(cutoff);
 
     auto fb0Block = juce::dsp::AudioBlock<float>(filterBuffers[0]);
     auto fb1Block = juce::dsp::AudioBlock<float>(filterBuffers[1]);
@@ -214,6 +219,14 @@ void SimpleMBCompAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto numSamples = buffer.getNumSamples();
     auto numChannels = buffer.getNumChannels();
 
+    //if (compressor.bypassed->get()) {
+    //    return;
+    //}
+    apBuffer = buffer;
+    auto apBlock = juce::dsp::AudioBlock<float>(apBuffer);
+    auto apContext = juce::dsp::ProcessContextReplacing<float>(apBlock);
+    AP.process(apContext);
+
     buffer.clear();
 
     auto addFilterBand = [nc = numChannels, ns = numSamples](auto& inputBuffer, const auto& source)
@@ -225,6 +238,14 @@ void SimpleMBCompAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     addFilterBand(buffer, filterBuffers[0]);
     addFilterBand(buffer, filterBuffers[1]);
+
+    if (compressor.bypassed->get()) {
+        for (auto ch = 0; ch < numChannels; ++ch) {
+            juce::FloatVectorOperations::multiply(apBuffer.getWritePointer(ch), -1.f, numSamples);
+        }
+
+        addFilterBand(buffer, apBuffer);
+    }
 }
 
 //==============================================================================
